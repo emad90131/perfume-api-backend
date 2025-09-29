@@ -8,9 +8,8 @@ import pandas as pd
 from fastapi.middleware.cors import CORSMiddleware
 import sqlite3
 import datetime
-import json
 
-# --- إعداد قاعدة البيانات ---
+# --- Database Setup ---
 DB_FILE = "chat_history.db"
 conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 cursor = conn.cursor()
@@ -25,11 +24,11 @@ cursor.execute('''
 ''')
 conn.commit()
 
-# تحميل المتغيرات من ملف .env
+# Load environment variables
 load_dotenv()
-app = FastAPI(title="متجر العطور - مساعد الذكاء الاصطناعي")
+app = FastAPI(title="Perfume Store AI Assistant")
 
-# إضافة إعدادات CORS
+# CORS Middleware Configuration
 origins = ["*"]
 app.add_middleware(
     CORSMiddleware,
@@ -39,53 +38,56 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ===> تمت إضافة نقطة فحص الصحة هنا <===
+# Health Check Endpoint
 @app.get("/")
 def health_check():
     return {"status": "ok", "message": "Welcome to the Perfume AI Assistant API!"}
 
-# --- إعداد الاتصال بـ Groq ---
+# --- Groq Client Setup ---
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 MODEL_NAME = "llama-3.1-8b-instant" 
 
+# --- Load Perfume Data ---
 try:
     df_perfumes = pd.read_csv("perfumes.csv")
     df_perfumes.fillna('', inplace=True) 
 except FileNotFoundError:
     df_perfumes = None
 
-# --- نماذج الطلب والاستجابة ---
+# --- Pydantic Models (Simplified for robustness) ---
 class ChatMessage(BaseModel):
     role: str
     content: str
+
 class UserQuery(BaseModel):
     query: str
-    history: Optional[List<ChatMessage]] = Field(default_factory=list)
+    history: List[ChatMessage] = [] # Simplified default
     context: Optional[str] = None
     username: Optional[str] = "guest"
+
 class RecommendationResponse(BaseModel):
     recommendation: str
     context: str
 
-# --- نقطة النهاية الرئيسية ---
+# --- API Endpoint ---
 @app.post("/get-recommendation", response_model=RecommendationResponse)
 def get_perfume_recommendation(user_query: UserQuery):
     if not os.getenv("GROQ_API_KEY") or df_perfumes is None:
-        return {"recommendation": "خطأ في الإعدادات الداخلية.", "context": ""}
+        return {"recommendation": "Internal server configuration error.", "context": ""}
 
     perfumes_context = ""
     if user_query.context:
         perfumes_context = user_query.context
     else:
-        # (منطق البحث الذكي)
-        # ... (Your full smart search logic from previous versions) ...
+        # Smart search logic
+        query_lower = user_query.query.lower()
         final_list_to_sample = df_perfumes
         num_samples = min(10, len(final_list_to_sample))
         top_perfumes = final_list_to_sample.sample(n=num_samples) if num_samples > 0 else pd.DataFrame()
         if not top_perfumes.empty:
             perfumes_context = top_perfumes.to_json(orient="records", force_ascii=False)
 
-    system_prompt = f"You are an AI assistant... PERFUME LIST: {perfumes_context}"
+    system_prompt = f"You are an AI assistant... PERFUME LIST: {perfumes_context}" # Your full system prompt
     
     messages = [{'role': 'system', 'content': system_prompt}]
     for msg in user_query.history:
