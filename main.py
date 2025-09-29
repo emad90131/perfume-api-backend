@@ -5,9 +5,10 @@ from typing import List, Optional
 from dotenv import load_dotenv
 from groq import Groq
 import pandas as pd
-from fastapi.middleware.cors import CORSMiddleware # <--- تأكد من وجود هذا السطر
+from fastapi.middleware.cors import CORSMiddleware
 import sqlite3
 import datetime
+import json
 
 # --- إعداد قاعدة البيانات ---
 DB_FILE = "chat_history.db"
@@ -28,17 +29,22 @@ conn.commit()
 load_dotenv()
 app = FastAPI(title="متجر العطور - مساعد الذكاء الاصطناعي")
 
-# ===> هذا هو الجزء الأهم لحل المشكلة <===
-origins = ["*"] # يسمح بالاتصال من أي موقع
+# إضافة إعدادات CORS
+origins = ["*"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"], # يسمح بكل الطرق مثل POST و GET و OPTIONS
+    allow_methods=["*"],
     allow_headers=["*"],
 )
-# ==========================================
 
+# ===> تمت إضافة نقطة فحص الصحة هنا <===
+@app.get("/")
+def health_check():
+    return {"status": "ok", "message": "Welcome to the Perfume AI Assistant API!"}
+
+# --- إعداد الاتصال بـ Groq ---
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 MODEL_NAME = "llama-3.1-8b-instant" 
 
@@ -48,22 +54,22 @@ try:
 except FileNotFoundError:
     df_perfumes = None
 
-# (باقي الكود كما هو)
+# --- نماذج الطلب والاستجابة ---
 class ChatMessage(BaseModel):
     role: str
     content: str
 class UserQuery(BaseModel):
     query: str
-    history: Optional[List[ChatMessage]] = Field(default_factory=list)
+    history: Optional[List<ChatMessage]] = Field(default_factory=list)
     context: Optional[str] = None
     username: Optional[str] = "guest"
 class RecommendationResponse(BaseModel):
     recommendation: str
     context: str
 
+# --- نقطة النهاية الرئيسية ---
 @app.post("/get-recommendation", response_model=RecommendationResponse)
 def get_perfume_recommendation(user_query: UserQuery):
-    # (المنطق الداخلي للدالة يبقى كما هو)
     if not os.getenv("GROQ_API_KEY") or df_perfumes is None:
         return {"recommendation": "خطأ في الإعدادات الداخلية.", "context": ""}
 
@@ -72,7 +78,7 @@ def get_perfume_recommendation(user_query: UserQuery):
         perfumes_context = user_query.context
     else:
         # (منطق البحث الذكي)
-        query_lower = user_query.query.lower()
+        # ... (Your full smart search logic from previous versions) ...
         final_list_to_sample = df_perfumes
         num_samples = min(10, len(final_list_to_sample))
         top_perfumes = final_list_to_sample.sample(n=num_samples) if num_samples > 0 else pd.DataFrame()
