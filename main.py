@@ -1,13 +1,18 @@
 import os
-from fastapi import FastAPI
+import sqlite3
+import datetime
+import pandas as pd
+from fastapi import FastAPI, Depends, Security, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from dotenv import load_dotenv
 from groq import Groq
-import pandas as pd
-from fastapi.middleware.cors import CORSMiddleware
-import sqlite3
-import datetime
+from starlette.status import HTTP_403_FORBIDDEN
+
+# Load environment variables
+load_dotenv()
 
 # --- Database Setup ---
 DB_FILE = "chat_history.db"
@@ -24,11 +29,23 @@ cursor.execute('''
 ''')
 conn.commit()
 
-# Load environment variables
-load_dotenv()
-app = FastAPI(title="Perfume Store AI Assistant")
+# --- Pydantic Models ---
+class ChatMessage(BaseModel):
+    role: str
+    content: str
 
-# CORS Middleware Configuration
+class UserQuery(BaseModel):
+    query: str
+    history: List[ChatMessage] = []
+    context: Optional[str] = None
+    username: Optional[str] = "guest"
+
+class RecommendationResponse(BaseModel):
+    recommendation: str
+    context: str
+
+# --- FastAPI App and CORS ---
+app = FastAPI(title="Perfume Store AI Assistant")
 origins = ["*"]
 app.add_middleware(
     CORSMiddleware,
@@ -38,36 +55,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Health Check Endpoint
-@app.get("/")
-def health_check():
-    return {"status": "ok", "message": "Welcome to the Perfume AI Assistant API!"}
-
-# --- Groq Client Setup ---
+# --- Groq Client and Data Loading ---
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 MODEL_NAME = "llama-3.1-8b-instant" 
 
-# --- Load Perfume Data ---
 try:
     df_perfumes = pd.read_csv("perfumes.csv")
     df_perfumes.fillna('', inplace=True) 
 except FileNotFoundError:
     df_perfumes = None
-
-# --- Pydantic Models (Simplified for robustness) ---
-class ChatMessage(BaseModel):
-    role: str
-    content: str
-
-class UserQuery(BaseModel):
-    query: str
-    history: List[ChatMessage] = [] # Simplified default
-    context: Optional[str] = None
-    username: Optional[str] = "guest"
-
-class RecommendationResponse(BaseModel):
-    recommendation: str
-    context: str
 
 # --- API Endpoint ---
 @app.post("/get-recommendation", response_model=RecommendationResponse)
@@ -87,13 +83,13 @@ def get_perfume_recommendation(user_query: UserQuery):
         if not top_perfumes.empty:
             perfumes_context = top_perfumes.to_json(orient="records", force_ascii=False)
 
-    system_prompt = f"You are an AI assistant... PERFUME LIST: {perfumes_context}" # Your full system prompt
+    system_prompt = "You are an AI assistant for a perfume store..." # Your full system prompt
     
-    messages = [{'role': 'system', 'content': system_prompt}]
+    messages = [{'role': 'system', 'content': f"{system_prompt}\n\nPERFUME LIST: {perfumes_context}"}]
     for msg in user_query.history:
         messages.append({'role': msg.role, 'content': msg.content})
     
-    final_user_prompt = f"""Based on the list, answer: "{user_query.query}"... (rest of your format prompt)"""
+    final_user_prompt = f"Based on the list, answer: \"{user_query.query}\"..." # Your full format prompt
     messages.append({'role': 'user', 'content': final_user_prompt})
     
     try:
@@ -113,3 +109,8 @@ def get_perfume_recommendation(user_query: UserQuery):
     except Exception as e:
         print(f"An error occurred: {e}")
         return {"recommendation": f"Sorry, an error occurred: {e}", "context": perfumes_context}
+
+# --- Health Check Endpoint ---
+@app.get("/")
+def health_check():
+    return {"status": "ok"}
